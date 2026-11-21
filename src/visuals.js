@@ -1,0 +1,40 @@
+'use strict';
+function atlasVisuals(host,state){
+ const {name,rows,targets,quota,rate,growth,discount,select,scope}=state;
+ const S='#426d59',C='#bd704d',B='#567e98',G='#a58135',ink='#314c40';
+ const total=(v,k='Sales')=>d3.sum(v,x=>+x[k]),group=(v,fn)=>d3.nest().key(fn).entries(v),month=x=>String(x['Order Date']).slice(0,7);
+ const note=document.createElement('output');note.className='chart-readout';note.setAttribute('aria-live','polite');
+ function frame(title,caption,height){const card=el(host,'section');card.className='artboard';el(card,'h3',title);el(card,'p',caption);return svg(card,740,height).attr('role','group').attr('aria-label',title)}
+ function tip(mark,label,click){mark.append('title').text(label);mark.attr('tabindex',0).attr('aria-label',label).on('mouseenter focus',function(d){note.textContent=label(d)});if(click)mark.style('cursor','pointer').attr('role','button').on('click',click).on('keydown',function(d){if(['Enter',' '].includes(d3.event.key)){d3.event.preventDefault();click(d)}})}
+ function lineplot(title,caption,series,format=money){
+ const entries=series.flatMap(s=>s.values);if(!entries.length)return;
+ const s=frame(title,caption,235),months=[...new Set(entries.map(d=>d[0]))].sort(),x=d3.scalePoint().domain(months).range([68,716]),y=d3.scaleLinear().domain([Math.min(0,d3.min(entries,d=>d[1])),Math.max(1,d3.max(entries,d=>d[1]))]).nice().range([179,30]);
+ s.append('g').attr('transform','translate(68,0)').call(d3.axisLeft(y).ticks(4).tickFormat(d3.format('~s')));
+ s.append('g').attr('transform','translate(0,179)').call(d3.axisBottom(x).tickValues(months.filter((_,i)=>i%Math.ceil(months.length/6)===0)));
+ series.forEach((a,i)=>{const col=[S,C,B,G][i%4],path=d3.line().x(d=>x(d[0])).y(d=>y(d[1]));
+ if(i===0)s.append('path').attr('fill','#e3ecdb').attr('d',d3.area().x(d=>x(d[0])).y0(y(0)).y1(d=>y(d[1]))(a.values));
+ s.append('path').attr('fill','none').attr('stroke',col).attr('stroke-width',2.6).attr('stroke-dasharray',a.dash?'6 4':null).attr('d',path(a.values)).attr('opacity',0).transition().duration(motion).attr('opacity',1);
+ const dots=s.append('g').selectAll('circle').data(a.values).join('circle').attr('cx',d=>x(d[0])).attr('cy',d=>y(d[1])).attr('r',3.5).attr('fill',col);
+ tip(dots,d=>a.key+' · '+d[0]+' · '+format(d[1]));
+ s.append('text').attr('x',65+i*158).attr('y',225).attr('fill',col).text('● '+a.key)})}
+ function timeline(r,k='Sales'){return group(r,month).sort((a,b)=>a.key.localeCompare(b.key)).map(g=>[g.key,total(g.values,k)])}
+ function bullets(title,caption,items,markLabel){items=items.slice(0,14);if(!items.length)return;const s=frame(title,caption,35+28*items.length),mx=d3.max(items,d=>Math.max(d[1],d[2]))||1,x=d3.scaleLinear().domain([0,mx]).range([0,380]);
+ items.forEach(([k,v,target],i)=>{const y=18+i*28;s.append('text').attr('x',4).attr('y',y+6).text(k.slice(0,26));s.append('rect').attr('x',212).attr('y',y-7).attr('width',380).attr('height',13).attr('fill','#eeeada');s.append('rect').attr('x',212).attr('y',y-7).attr('height',13).attr('fill',v>=target?S:C).attr('width',0).transition().duration(motion).attr('width',x(v));s.append('path').attr('d','M'+(212+x(target))+','+(y-11)+'v21').attr('stroke',ink).attr('stroke-width',2).append('title').text(markLabel+' '+money(target));s.append('text').attr('x',605).attr('y',y+5).text(money(v))})}
+ function scatter(r,key,strip){let points=group(r,x=>x[key]).map(g=>({name:g.key,s:total(g.values),p:total(g.values,'Profit'),sub:g.values[0]['Sub-Category']}));if(!points.length)return;
+ const cats=[...new Set(points.map(d=>d.sub))].sort(),h=strip?85+cats.length*25:310,s=frame(strip?'Product sales by sub-category':'Customer sales and profit',strip?'Each dot is a product. Dark ticks mark median sales. Select a dot to search for that product.':'Each dot is a customer. Points below the zero line represent losses. Select a dot to inspect that customer.',h);
+ const left=strip?125:75,x=d3.scaleLinear().domain([0,d3.max(points,d=>d.s)||1]).nice().range([left,712]),y=strip?d3.scalePoint().domain(cats).range([22,h-50]):d3.scaleLinear().domain([Math.min(0,d3.min(points,d=>d.p)),Math.max(1,d3.max(points,d=>d.p))]).nice().range([h-50,20]);
+ s.append('g').attr('transform','translate(0,'+(h-35)+')').call(d3.axisBottom(x).ticks(6).tickFormat(d3.format('~s')));s.append('text').attr('x',350).attr('y',h-2).text('Sales · USD');
+ s.append('g').attr('transform','translate('+left+',0)').call(strip?d3.axisLeft(y):d3.axisLeft(y).ticks(5).tickFormat(d3.format('~s')));
+ if(!strip)s.append('path').attr('d','M75,'+y(0)+'H712').attr('stroke','#9b9c8c');const dots=s.append('g').selectAll('circle').data(points).join('circle').attr('cx',d=>x(d.s)).attr('cy',(d,i)=>strip?y(d.sub)+(i%5-2)*1.6:y(d.p)).attr('r',4).attr('fill',d=>d.p<0?C:S).attr('opacity',.72);
+ tip(dots,d=>d.name+' · Sales '+money(d.s)+' · Profit '+money(d.p),d=>select(d.name));if(strip)cats.forEach(k=>{const m=d3.median(points.filter(d=>d.sub===k),d=>d.s);s.append('path').attr('d','M'+x(m)+','+(y(k)-8)+'v16').attr('stroke',ink).attr('pointer-events','none')});}
+ if(name==='Product'){
+ const grid=group(rows,x=>month(x)).map(g=>({m:g.key,v:total(g.values)})),years=[...new Set(grid.map(d=>d.m.slice(0,4)))].sort(),s=frame('Sales calendar','Choose a month to drill into its product mix. Select it again to clear.',65+years.length*32),color=d3.scaleSequential(d3.interpolateGreens).domain([0,d3.max(grid,d=>d.v)||1]);years.forEach((v,i)=>s.append('text').attr('x',0).attr('y',50+i*32).text(v));'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ').forEach((v,i)=>s.append('text').attr('x',68+i*55).attr('y',19).text(v));
+ const marks=s.selectAll('rect').data(grid).join('rect').attr('x',d=>60+55*(+d.m.slice(5)-1)).attr('y',d=>31+32*years.indexOf(d.m.slice(0,4))).attr('width',49).attr('height',25).attr('rx',3).attr('fill',d=>color(d.v));let sub=el(host,'div');let chosen='';function drill(){const prev=host;sub.replaceChildren();const temp=document.createElement('div');sub.append(temp);const before=[...prev.children];scatter(chosen?rows.filter(d=>month(d)===chosen):rows,'Product Name',true);temp.append(prev.lastElementChild);marks.attr('stroke',d=>d.m===chosen?ink:'none').attr('stroke-width',3)}tip(marks,d=>d.m+' · '+money(d.v),d=>{chosen=chosen===d.m?'':d.m;drill()});drill()
+ }else if(name==='Customers'){scatter(rows,'Customer Name',false)}
+ else if(name==='Shipping'){const modes=group(rows,x=>x['Ship Mode']);lineplot('Orders shipped by mode','Monthly order counts grouped by order month.',modes.map(g=>({key:g.key,values:group(g.values,month).sort((a,b)=>a.key.localeCompare(b.key)).map(v=>[v.key,new Set(v.values.map(x=>x['Order ID'])).size])})),String)}
+ else if(name==='Commission Model'){bullets('Salesperson quota attainment','Bar = achieved sales. Vertical tick = selected quota.',group(rows,x=>x['Sales Person']).map(g=>[g.key,total(g.values),quota]).sort((a,b)=>b[1]-a[1]),'Quota')}
+ else if(name==='Performance'){const tg=group(targets,x=>x.Category);bullets('Sales versus target by category','Vertical ticks are all-region targets for the selected segment.',group(rows,x=>x.Category).map(g=>[g.key,total(g.values),total(tg.find(t=>t.key===g.key)?.values||[],'Sales Target')]),'Target')}
+ else if(name==='Order Details'){lineplot('Order sales and profit','Monthly totals recalculate with the order or product search.',[{key:'Sales',values:timeline(rows)},{key:'Profit',values:timeline(rows,'Profit')}])}
+ else{let actual=timeline(rows),comparison=[];if(name==='Forecast'){const last=actual.at(-1)[0];comparison=[[last,actual.at(-1)[1]],...actual.map(([m,v])=>[(+m.slice(0,4)+1)+m.slice(4),v]).filter(([m])=>m>last)]}else comparison=actual.map(([m,v])=>[m,v*(1+growth/100)*(1-discount/100)]);lineplot(name==='Forecast'?'Observed sales and seasonal outlook':'Actual sales versus your scenario',name==='Forecast'?'Dashed projection repeats the same month from the prior year.':'Adjust volume or price to redraw the projected sales path.',[{key:'Actual sales',values:actual},{key:name==='Forecast'?'Seasonal baseline':'Scenario sales',values:comparison,dash:true}])}
+ host.append(note)
+}
